@@ -71,11 +71,13 @@ async fn start() -> Result<()> {
     Ok(())
 }
 
+/// 模拟请求登录页，获取 i_like_gogs _csrf
 async fn get_auth_from_login() -> Result<Auth> {
     let resp = reqwest::get(format!("{HOST}/user/login")).await?;
     Ok(get_auth_from(&resp))
 }
 
+/// 登录完成后返回 i_like_gogs _csrf
 async fn login(auth: &Auth, username: &str, passwd: &str) -> Result<Auth> {
     let mut params = HashMap::new();
     params.insert("user_name", username);
@@ -99,6 +101,7 @@ async fn login(auth: &Auth, username: &str, passwd: &str) -> Result<Auth> {
     Ok(new_auth)
 }
 
+/// 修改密码
 async fn change_passwd(auth: &Auth, old_passwd: &str, new_passwd: &str) -> Result<String> {
     let mut params = HashMap::new();
     params.insert("old_password", old_passwd);
@@ -121,6 +124,7 @@ async fn change_passwd(auth: &Auth, old_passwd: &str, new_passwd: &str) -> Resul
     Ok(new_passwd.to_string())
 }
 
+/// 解析cookie字符串
 fn parse_cookies(v: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let re = Regex::new(r"(?i)([^=;]+)=([^;]*)").unwrap();
@@ -135,6 +139,7 @@ fn parse_cookies(v: &str) -> HashMap<String, String> {
     map
 }
 
+/// 解析响应体中的cookie， 获取i_like_gogs _csrf
 fn get_auth_from(resp: &Response) -> Auth {
     let mut auth = Auth {
         i_like_gogs: String::from(""),
