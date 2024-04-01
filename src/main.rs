@@ -3,7 +3,8 @@ use anyhow::{Ok, Result};
 use clap::Parser;
 use regex::bytes::Regex;
 use reqwest::header::HeaderMap;
-use reqwest::Response;
+use reqwest::redirect::Policy;
+use reqwest::{Client, Response};
 use std::{
     collections::HashMap,
     env,
@@ -13,6 +14,7 @@ use std::{
     time::Duration,
 };
 use tokio::time::sleep;
+use urlencoding::decode;
 
 static HOST: &str = "http://10.32.108.93:3000";
 
@@ -64,17 +66,11 @@ async fn start() -> Result<()> {
         }
     }
 
-    println!(
-        "login: {} {}",
-        &args.username, &args.passwd
-    );
+    println!("login: {} {}", &args.username, &args.passwd);
     let auth = login(&args.username, &args.passwd).await?;
 
     println!("change: {} -> {}", &args.passwd, &args.temp_passwd);
     change_passwd(&auth, &args.passwd, &args.temp_passwd).await?;
-
-    println!("check: {}", &args.temp_passwd);
-    login(&args.username, &args.temp_passwd).await?;
 
     write_real_passwd(&args.username, &args.temp_passwd);
     println!("success",);
@@ -119,14 +115,29 @@ async fn login(username: &str, passwd: &str) -> Result<Auth> {
     // write_file("success.html", &resp.text().await.unwrap());
 }
 
-/// 修改密码
+/// ### 修改密码
+/// "{HOST}/user/settings/password" 
+/// 
+/// #### 注意
+/// 接口会发生重定向， 重定向之后无法获取cookie，需要获取重定向之前的响应体
+///  
+/// #### 重定向之前的响应体
+/// 
+/// - 修改成功 
+/// ```
+/// set-cookie: "macaron_flash": "success%3D%25E5%25AF%2586%25E7%25A0%2581%25E4%25BF%25AE%25E6%2594%25B9%25E6%2588%2590%25E5%258A%259F%25EF%25BC%2581%25E6%2582%25A8%25E7%258E%25B0%25E5%259C%25A8%25E5%258F%25AF%25E4%25BB%25A5%25E4%25BD%25BF%25E7%2594%25A8%25E6%2596%25B0%25E7%259A%2584%25E5%25AF%2586%25E7%25A0%2581%25E7%2599%25BB%25E5%25BD%2595%25E3%2580%2582"
+/// ```
+/// - 修改失败
+/// ```
+/// set-cookie: "macaron_flash": "error%3D%25E5%25BD%2593%25E5%2589%258D%25E5%25AF%2586%25E7%25A0%2581%25E4%25B8%258D%25E6%25AD%25A3%25E7%25A1%25AE%25EF%25BC%2581"
+/// ```
 async fn change_passwd(auth: &Auth, old_passwd: &str, new_passwd: &str) -> Result<String> {
     let mut params = HashMap::new();
     params.insert("old_password", old_passwd);
     params.insert("password", new_passwd);
     params.insert("retype", new_passwd);
     params.insert("_csrf", &auth._csrf);
-    let client = reqwest::Client::new();
+    let client = Client::builder().redirect(Policy::none()).build()?;
     let mut header_map = HeaderMap::new();
     header_map.insert(
         "Cookie",
@@ -138,13 +149,28 @@ async fn change_passwd(auth: &Auth, old_passwd: &str, new_passwd: &str) -> Resul
         .parse()
         .unwrap(),
     );
-    client
+    let resp = client
         .post(format!("{HOST}/user/settings/password"))
         .form(&params)
         .headers(header_map)
         .send()
         .await?;
-    Ok(new_passwd.to_string())
+    let c = parse_cookie_from_response(&resp);
+    let macaron_flash = c.get("macaron_flash");
+    if let Some(macaron_flash) = macaron_flash {
+        let decoded = decode(&decode(macaron_flash)?.to_string())?.to_string();
+        let error_flag = "error=";
+        let success_flag = "success=";
+        if decoded.starts_with(success_flag) {
+            return Ok(new_passwd.to_string());
+        } else if decoded.starts_with(error_flag) {
+            return Err(anyhow!(
+                "change failed: {}",
+                decoded.replace(error_flag, "")
+            ));
+        }
+    }
+    Err(anyhow!("change failed: unknown"))
 }
 
 /// 解析cookie字符串
@@ -221,3 +247,13 @@ fn get_temp_dir() -> PathBuf {
     }
     temp_dir
 }
+
+// fn write_file(file_name: &str, content: &str) {
+//     let mut f = OpenOptions::new()
+//         .create(true)
+//         .truncate(true)
+//         .write(true)
+//         .open(std::path::Path::new(r"D:\github\gpasswd").join(file_name))
+//         .unwrap();
+//     f.write_all(content.as_bytes()).unwrap();
+// }
