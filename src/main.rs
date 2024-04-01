@@ -1,6 +1,8 @@
+use anyhow::anyhow;
 use anyhow::{Ok, Result};
 use clap::Parser;
 use regex::bytes::Regex;
+use reqwest::header::HeaderMap;
 use reqwest::Response;
 use std::{
     collections::HashMap,
@@ -14,6 +16,7 @@ use tokio::time::sleep;
 
 static HOST: &str = "http://10.32.108.93:3000";
 
+#[derive(Debug)]
 struct Auth {
     i_like_gogs: String,
     _csrf: String,
@@ -60,14 +63,22 @@ async fn start() -> Result<()> {
             args.temp_passwd = temp;
         }
     }
-    let auth = get_auth_from_login().await?;
-    let auth = login(&auth, &args.username, &args.passwd).await?;
-    change_passwd(&auth, &args.passwd, &args.temp_passwd).await?;
-    writ_real_passwd(&args.username, &args.temp_passwd);
+
     println!(
-        "username: {}, passwd: {}",
-        &args.username, &args.temp_passwd
+        "login: {} {}",
+        &args.username, &args.passwd
     );
+    let auth = login(&args.username, &args.passwd).await?;
+
+    println!("change: {} -> {}", &args.passwd, &args.temp_passwd);
+    change_passwd(&auth, &args.passwd, &args.temp_passwd).await?;
+
+    println!("check: {}", &args.temp_passwd);
+    login(&args.username, &args.temp_passwd).await?;
+
+    write_real_passwd(&args.username, &args.temp_passwd);
+    println!("success",);
+
     Ok(())
 }
 
@@ -78,7 +89,8 @@ async fn get_auth_from_login() -> Result<Auth> {
 }
 
 /// 登录完成后返回 i_like_gogs _csrf
-async fn login(auth: &Auth, username: &str, passwd: &str) -> Result<Auth> {
+async fn login(username: &str, passwd: &str) -> Result<Auth> {
+    let auth = get_auth_from_login().await?;
     let mut params = HashMap::new();
     params.insert("user_name", username);
     params.insert("password", passwd);
@@ -97,8 +109,14 @@ async fn login(auth: &Auth, username: &str, passwd: &str) -> Result<Auth> {
         .send()
         .await?;
     let mut new_auth = get_auth_from(&resp);
-    new_auth.i_like_gogs = auth.i_like_gogs.to_owned();
-    Ok(new_auth)
+    let regx = Regex::new("用户名或密码不正确").unwrap();
+    if regx.is_match(&resp.text().await.unwrap().as_bytes()) {
+        Err(anyhow!("用户名或密码不正确"))
+    } else {
+        new_auth.i_like_gogs = auth.i_like_gogs.to_owned();
+        Ok(new_auth)
+    }
+    // write_file("success.html", &resp.text().await.unwrap());
 }
 
 /// 修改密码
@@ -109,16 +127,21 @@ async fn change_passwd(auth: &Auth, old_passwd: &str, new_passwd: &str) -> Resul
     params.insert("retype", new_passwd);
     params.insert("_csrf", &auth._csrf);
     let client = reqwest::Client::new();
+    let mut header_map = HeaderMap::new();
+    header_map.insert(
+        "Cookie",
+        format!(
+            "lang=zh-CN; i_like_gogs={}; _csrf={};",
+            auth.i_like_gogs, auth._csrf
+        )
+        .as_str()
+        .parse()
+        .unwrap(),
+    );
     client
         .post(format!("{HOST}/user/settings/password"))
         .form(&params)
-        .header(
-            "Cookie",
-            format!(
-                "lang=zh-CN; i_like_gogs={}; _csrf={};",
-                auth.i_like_gogs, auth._csrf
-            ),
-        )
+        .headers(header_map)
         .send()
         .await?;
     Ok(new_passwd.to_string())
@@ -139,27 +162,35 @@ fn parse_cookies(v: &str) -> HashMap<String, String> {
     map
 }
 
+// 解析响应体中的cookie
+fn parse_cookie_from_response(resp: &Response) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    resp.headers().get_all("set-cookie").iter().for_each(|v| {
+        let cookie = parse_cookies(v.to_str().unwrap());
+        map.extend(cookie)
+    });
+    map
+}
+
 /// 解析响应体中的cookie， 获取i_like_gogs _csrf
 fn get_auth_from(resp: &Response) -> Auth {
     let mut auth = Auth {
         i_like_gogs: String::from(""),
         _csrf: String::from(""),
     };
-    resp.headers().get_all("set-cookie").iter().for_each(|v| {
-        let cookie = parse_cookies(v.to_str().unwrap());
-        let i_like_gogs = cookie.get("i_like_gogs");
-        let _csrf = cookie.get("_csrf");
-        if let Some(i_like_gogs) = i_like_gogs {
-            auth.i_like_gogs = i_like_gogs.to_owned();
-        }
-        if let Some(_csrf) = _csrf {
-            auth._csrf = _csrf.to_owned();
-        }
-    });
+    let cookie = parse_cookie_from_response(resp);
+    let i_like_gogs = cookie.get("i_like_gogs");
+    let _csrf = cookie.get("_csrf");
+    if let Some(i_like_gogs) = i_like_gogs {
+        auth.i_like_gogs = i_like_gogs.to_owned();
+    }
+    if let Some(_csrf) = _csrf {
+        auth._csrf = _csrf.to_owned();
+    }
     auth
 }
 
-fn writ_real_passwd(username: &str, passwd: &str) {
+fn write_real_passwd(username: &str, passwd: &str) {
     let temp_dir = get_temp_dir();
     let f_buf = temp_dir.join(username);
     let mut f = OpenOptions::new()
