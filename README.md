@@ -1,30 +1,40 @@
-### 开发环境
+## Auto Change Gogs Password
+
+This tool automatically changes the password for a Gogs user. If executed a second time, it will revert the password back to its original state.
+
+### Development Environment
 
 - rustc: rustc 1.78.0-nightly
 - system: windows,linux,mac
 - runtime: windows,linux,mac
 
-### 编译
+### Compilation
 
-#### 安装docker
+#### Install Docker
 
-[docker文档](https://docs.docker.com/get-docker/)
+Refer to the [Docker documentation](https://docs.docker.com/get-docker/) for installation instructions.
 
-#### 安装cross
+#### Install Cross
 
-[cross 文档](https://github.com/cross-rs/cross)
+Refer to the [Cross documentation](https://github.com/cross-rs/cross) for more details.
 
 ```bash
 cargo install cross --git https://github.com/cross-rs/cross
 ```
-#### 编译至目标平台
+
+#### Compile to Target Platform
 
 ```bash
 cross build --target x86_64-unknown-linux-musl --release
 ```
 
-## 使用方式
+## Usage
 
 ```
-cargo run -- -u <用户名> -p <密码> -t <临时密码>
+cargo run -- --host <HOST> -u <USERNAME> -p <PASSWORD> -t <TEMP_PASSWORD>
 ```
+
+- `host`: Format like http://ip:port
+- `u`: Username
+- `p`: Password
+- `t`: Temporary password
