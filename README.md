@@ -31,7 +31,7 @@ cross build --target x86_64-unknown-linux-musl --release
 ## Usage
 
 ```
-cargo run -- --host <HOST> -u <USERNAME> -p <PASSWORD> -t <TEMP_PASSWORD>
+gpasswd --host <HOST> -u <USERNAME> -p <PASSWORD> -t <TEMP_PASSWORD>
 ```
 
 - `host`: Format like http://ip:port
